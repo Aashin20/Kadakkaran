@@ -1,7 +1,9 @@
 import json
 import os
 import re
+from difflib import SequenceMatcher
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 from pathlib import Path
 
@@ -26,14 +28,16 @@ def find_product(db, name: str = "", product_id: int | None = None):
     else:
         rows = db.execute("SELECT * FROM products").fetchall()
         clean = re.sub(r"\s+", "", name).lower()
-        row = next(
-            (
-                candidate
-                for candidate in rows
-                if clean and re.sub(r"\s+", "", candidate["name"]).lower() in clean
-            ),
-            None,
-        )
+        row = None
+        for candidate in rows:
+            candidate_clean = re.sub(r"\s+", "", candidate["name"]).lower()
+            if clean and (
+                candidate_clean in clean
+                or clean in candidate_clean
+                or SequenceMatcher(None, candidate_clean, clean).ratio() >= 0.72
+            ):
+                row = candidate
+                break
     return row
 
 
@@ -74,6 +78,19 @@ def analytics() -> dict[str, Any]:
         low_stock = db.execute(
             "SELECT id, name, stock FROM products WHERE stock <= 10 ORDER BY stock, name"
         ).fetchall()
+        top_selling = db.execute(
+            """
+            SELECT p.id, p.name,
+                   COALESCE(SUM(s.quantity), 0) AS sold_quantity,
+                   COALESCE(SUM(s.total), 0) AS revenue
+            FROM products p
+            LEFT JOIN sales s ON s.product_id = p.id
+            GROUP BY p.id, p.name
+            HAVING COALESCE(SUM(s.quantity), 0) > 0
+            ORDER BY sold_quantity DESC, revenue DESC, p.name
+            LIMIT 5
+            """
+        ).fetchall()
 
     product_list = [dict(row) for row in products]
     credit_list = [dict(row) for row in credits]
@@ -86,6 +103,35 @@ def analytics() -> dict[str, Any]:
             row["amount"] for row in credit_list if row["paid_at"] is None
         ),
         "top_stock": sorted(product_list, key=lambda row: row["stock"], reverse=True)[:5],
+        "top_selling": [dict(row) for row in top_selling],
+    }
+
+
+def top_selling(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        limit = int(args.get("limit", 5))
+    except (TypeError, ValueError):
+        limit = 5
+    limit = min(max(limit, 1), 10)
+
+    with get_db() as db:
+        rows = db.execute(
+            """
+            SELECT p.id, p.name,
+                   COALESCE(SUM(s.quantity), 0) AS sold_quantity,
+                   COALESCE(SUM(s.total), 0) AS revenue
+            FROM products p
+            LEFT JOIN sales s ON s.product_id = p.id
+            GROUP BY p.id, p.name
+            HAVING COALESCE(SUM(s.quantity), 0) > 0
+            ORDER BY sold_quantity DESC, revenue DESC, p.name
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return {
+        "top_selling": [dict(row) for row in rows],
+        "count": len(rows),
     }
 
 
@@ -99,6 +145,68 @@ def list_credits(args: dict[str, Any]) -> dict[str, Any]:
     if args.get("unpaid_only"):
         credits = [item for item in credits if item["paid_at"] is None]
     return {"credits": credits}
+
+
+def find_credit(db, credit_id: Any = None, name: str = "", unpaid_only: bool = False):
+    if credit_id is not None:
+        try:
+            row = db.execute(
+                "SELECT * FROM credits WHERE id = ?", (int(credit_id),)
+            ).fetchone()
+            if row is not None:
+                if unpaid_only and row["paid_at"] is not None:
+                    return None
+                return row
+        except (TypeError, ValueError):
+            pass
+
+    clean = re.sub(r"\s+", "", name).strip().lower()
+    if not clean:
+        return None
+
+    name_aliases = {
+        "രമേശ്": {"ramesh", "rameesh", "rames", "ramesh"},
+        "ലക്ഷ്മിചേച്ചി": {"lakshmi", "lakshmichechi", "lakshmi chechi"},
+        "അബ്ദുള്ള": {"abdulla", "abdullah", "abdulla"},
+        "സുരേഷ്": {"suresh", "sures"},
+        "അനിത": {"anitha", "anita"},
+    }
+
+    sql = "SELECT * FROM credits"
+    if unpaid_only:
+        sql += " WHERE paid_at IS NULL"
+    sql += " ORDER BY id DESC"
+    rows = db.execute(sql).fetchall()
+
+    for row in rows:
+        candidate = re.sub(r"\s+", "", row["name"]).strip().lower()
+        if candidate == clean:
+            return row
+        aliases = next(
+            (
+                aliases
+                for malayalam_name, aliases in name_aliases.items()
+                if re.sub(r"\s+", "", malayalam_name).lower() == candidate
+            ),
+            set(),
+        )
+        if clean in {re.sub(r"\s+", "", alias).lower() for alias in aliases}:
+            return row
+
+    for row in rows:
+        candidate = re.sub(r"\s+", "", row["name"]).strip().lower()
+        if clean in candidate or candidate in clean:
+            return row
+
+    best_row = None
+    best_score = 0.0
+    for row in rows:
+        candidate = re.sub(r"\s+", "", row["name"]).strip().lower()
+        score = SequenceMatcher(None, candidate, clean).ratio()
+        if score > best_score:
+            best_row = row
+            best_score = score
+    return best_row if best_score >= 0.72 else None
 
 
 def to_number(value: Any) -> float | None:
@@ -152,7 +260,7 @@ def adjust_stock(args: dict[str, Any]) -> dict[str, Any]:
                 product["id"],
                 quantity,
                 "IN" if operation == "add" else "OUT",
-                "AI sale" if is_sale else "Groq AI stock adjustment",
+                "Sold" if is_sale else "Groq AI stock adjustment",
                 now,
             ),
         )
@@ -184,6 +292,53 @@ def adjust_stock(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def prepare_bill(args: dict[str, Any]) -> dict[str, Any]:
+    raw_items = args.get("items")
+    if not isinstance(raw_items, list) or not raw_items:
+        raise HTTPException(status_code=400, detail="Bill items are required")
+
+    items: list[dict[str, Any]] = []
+    with get_db() as db:
+        for raw_item in raw_items:
+            if not isinstance(raw_item, dict):
+                continue
+            number = to_number(raw_item.get("quantity"))
+            quantity = int(number) if number is not None and number == int(number) else None
+            if quantity is None or quantity <= 0:
+                raise HTTPException(status_code=400, detail="quantity must be a positive integer")
+
+            product = find_product(
+                db,
+                str(raw_item.get("product_name", "")),
+                raw_item.get("product_id"),
+            )
+            if product is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Product not found: {raw_item.get('product_name', '')}",
+                )
+            if quantity > product["stock"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Insufficient stock for {product['name']}. Available: {product['stock']}",
+                )
+
+            items.append({
+                "product_id": product["id"],
+                "name": product["name"],
+                "quantity": quantity,
+                "price": product["price"],
+                "stock": product["stock"],
+                "total": product["price"] * quantity,
+            })
+
+    return {
+        "items": items,
+        "cart_total": sum(item["total"] for item in items),
+        "count": sum(item["quantity"] for item in items),
+    }
+
+
 def add_credit(args: dict[str, Any]) -> dict[str, Any]:
     name = str(args.get("name", "")).strip()
     amount = to_number(args.get("amount"))
@@ -211,14 +366,7 @@ def mark_credit_paid(args: dict[str, Any]) -> dict[str, Any]:
     credit_id = args.get("credit_id")
     name = str(args.get("name", "")).strip()
     with get_db() as db:
-        if credit_id is not None:
-            row = db.execute("SELECT * FROM credits WHERE id = ?", (credit_id,)).fetchone()
-        else:
-            row = db.execute(
-                "SELECT * FROM credits WHERE lower(name) LIKE ? AND paid_at IS NULL "
-                "ORDER BY id DESC",
-                (f"%{name.lower()}%",),
-            ).fetchone()
+        row = find_credit(db, credit_id, name, unpaid_only=True)
         if row is None:
             raise HTTPException(status_code=404, detail="Credit record not found")
         db.execute(
@@ -229,14 +377,75 @@ def mark_credit_paid(args: dict[str, Any]) -> dict[str, Any]:
     return {"credit": dict(updated)}
 
 
+def update_credit(args: dict[str, Any]) -> dict[str, Any]:
+    credit_id = args.get("credit_id")
+    name = str(args.get("name", "")).strip()
+    updates: dict[str, Any] = {}
+
+    if "amount" in args:
+        amount = to_number(args.get("amount"))
+        if amount is None or amount <= 0:
+            raise HTTPException(status_code=400, detail="amount must be a positive number")
+        updates["amount"] = float(amount)
+    elif "amount_change" in args:
+        amount_change = to_number(args.get("amount_change"))
+        if amount_change is None:
+            raise HTTPException(status_code=400, detail="amount_change must be a number")
+        updates["_amount_change"] = float(amount_change)
+
+    if "new_name" in args:
+        new_name = str(args.get("new_name", "")).strip()
+        if not new_name:
+            raise HTTPException(status_code=400, detail="new_name cannot be empty")
+        updates["name"] = new_name
+    elif "name_update" in args:
+        new_name = str(args.get("name_update", "")).strip()
+        if not new_name:
+            raise HTTPException(status_code=400, detail="name_update cannot be empty")
+        updates["name"] = new_name
+
+    if "pay_at" in args:
+        try:
+            pay_at = datetime.fromisoformat(str(args["pay_at"]))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="pay_at must be an ISO datetime")
+        updates["pay_at"] = pay_at.isoformat()
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No credit fields provided to update")
+
+    with get_db() as db:
+        row = find_credit(db, credit_id, name)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Credit record not found")
+
+        amount_change = updates.pop("_amount_change", None)
+        if amount_change is not None:
+            next_amount = float(row["amount"]) + amount_change
+            if next_amount <= 0:
+                raise HTTPException(status_code=400, detail="Updated credit amount must be positive")
+            updates["amount"] = next_amount
+
+        set_clause = ", ".join(f"{column} = ?" for column in updates)
+        db.execute(
+            f"UPDATE credits SET {set_clause} WHERE id = ?",
+            [*updates.values(), row["id"]],
+        )
+        updated = db.execute("SELECT * FROM credits WHERE id = ?", (row["id"],)).fetchone()
+    return {"credit": dict(updated)}
+
+
 TOOLS = {
     "list_products": lambda args: list_products(),
     "list_stock": list_stock,
     "low_stock": lambda args: list_stock({"low_only": True}),
     "analytics": lambda args: analytics(),
+    "top_selling": top_selling,
     "list_credits": list_credits,
     "adjust_stock": adjust_stock,
+    "prepare_bill": prepare_bill,
     "add_credit": add_credit,
+    "update_credit": update_credit,
     "mark_credit_paid": mark_credit_paid,
 }
 
@@ -281,9 +490,16 @@ def chat(payload: AIChatRequest):
                     f"Available tools: {tool_names}, general. "
                     "JSON keys: tool, args. "
                     "Use adjust_stock args: operation(add/remove), product_name, quantity. "
+                    "If a request is a bill/sale, use prepare_bill with args {items:[{product_name,quantity},...]}. "
+                    "Never execute prepare_bill: it only prepares the checkout preview. "
                     "Use add_credit args: name, amount, optional pay_at. "
+                    "Use update_credit args: name or credit_id, plus amount, amount_change, "
+                    "new_name/name_update, or pay_at. "
                     "Use mark_credit_paid args: name or credit_id. "
                     "Use list_credits args: unpaid_only. "
+                    "Use top_selling args: optional limit for questions about the most/best-selling "
+                    "or top-selling products. "
+                    "Use analytics for inventory, sales summary, profit, and stock analytics questions. "
                     "Never invent a name or ID. For stock questions use list_stock/low_stock/analytics."
                 ),
             },
@@ -329,6 +545,8 @@ def chat(payload: AIChatRequest):
                     "Be concise and useful. Use the provided structured result. "
                     "If the result contains an error, explain the problem briefly. "
                     "For actions, confirm what changed. For analytics, include the actual numbers. "
+                    "Never include decimal points or decimal fractions in the spoken reply. "
+                    "Round every amount or quantity to the nearest whole number. "
                     "Do not claim an action happened unless it is in the result."
                 ),
             },
@@ -343,6 +561,7 @@ def chat(payload: AIChatRequest):
         ],
     )
     groq_reply = answer.choices[0].message.content or ""
+    groq_reply = remove_decimal_numbers(groq_reply)
     print(f"Groq response: {groq_reply}", flush=True)
 
     endpoint = None
@@ -361,6 +580,12 @@ def chat(payload: AIChatRequest):
         endpoint = "/credits"
         if isinstance(credit, dict) and credit.get("id") is not None:
             endpoint = f"/credits/{credit['id']}"
+    elif tool_name == "update_credit":
+        credit = tool_result.get("credit")
+        credit_id = credit.get("id") if isinstance(credit, dict) else None
+        if credit_id is not None:
+            method = "PATCH"
+            endpoint = f"/credits/{credit_id}"
     elif tool_name == "mark_credit_paid":
         credit = tool_result.get("credit")
         credit_id = credit.get("id") if isinstance(credit, dict) else None
@@ -379,6 +604,9 @@ def chat(payload: AIChatRequest):
     elif tool_name == "analytics":
         method = "GET"
         endpoint = "/stock"
+    elif tool_name == "top_selling":
+        method = "GET"
+        endpoint = "/stock/sales/top"
 
     return {
         "reply": groq_reply,
@@ -400,7 +628,23 @@ class TTSRequest(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
 
 
+def remove_decimal_numbers(text: str) -> str:
+    """Round decimal numbers to whole numbers before text is shown or spoken."""
+    decimal_pattern = re.compile(r"(?<![\w])[-+]?\d[\d,]*\.\d+(?![\w])")
+
+    def round_number(match: re.Match[str]) -> str:
+        value = match.group(0).replace(",", "")
+        try:
+            rounded = Decimal(value).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            return str(int(rounded))
+        except (InvalidOperation, ValueError):
+            return match.group(0)
+
+    return decimal_pattern.sub(round_number, text)
+
+
 def clean_for_speech(text: str) -> str:
+    text = remove_decimal_numbers(text)
     text = re.sub(r"```.*?```", " ", text, flags=re.S)
     text = re.sub(r"https?://\S+", " ", text)
     text = re.sub(r"[*_#`>|~]+", " ", text)
