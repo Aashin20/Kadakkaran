@@ -28,6 +28,10 @@ const submit = () => (isOrder() ? saveOrder() : makeBill())
         <span>ആകെ</span>
         <strong class="num">₹{{ payable }}</strong>
       </div>
+      <label class="form-row pdf-option">
+        <span>PDF ബിൽ ഉണ്ടാക്കുക</span>
+        <input v-model="state.generatePdf" type="checkbox" />
+      </label>
     </div>
 
     <div class="section-head"><h3 class="section-title">പേയ്മെന്റ്</h3></div>
@@ -62,4 +66,5 @@ const submit = () => (isOrder() ? saveOrder() : makeBill())
 <style scoped>
 .gap { margin-top: 16px; }
 .total strong { flex: 1; text-align: right; font-size: 24px; font-weight: 700; letter-spacing: -.02em; }
+.pdf-option input { width: 20px; height: 20px; flex: 0 0 20px; accent-color: var(--accent-fill); }
 </style>
