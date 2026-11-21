@@ -59,7 +59,7 @@ input, select { outline: none; }
 }
 .app-main { flex: 1; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
 .app-main::-webkit-scrollbar { display: none; }
-.page { padding: 4px 16px 28px; }
+.page { padding: 4px 16px calc(96px + env(safe-area-inset-bottom, 0px)); }
 .view { animation: fade-in .2s ease both; }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
