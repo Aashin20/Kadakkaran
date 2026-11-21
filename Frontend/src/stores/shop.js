@@ -5,6 +5,41 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, ''
 
 const now = () => new Date().toLocaleTimeString('ml-IN', { hour: '2-digit', minute: '2-digit' })
 
+export const displayUnit = (unit) => {
+  const key = String(unit || '').trim().toLowerCase()
+  const units = {
+    kilo: 'kg',
+    kg: 'kg',
+    kgs: 'kg',
+    kilogram: 'kg',
+    kilograms: 'kg',
+    കിലോ: 'kg',
+    എണ്ണം: 'pcs',
+    piece: 'pcs',
+    pieces: 'pcs',
+    pc: 'pcs',
+    pcs: 'pcs',
+    packet: 'pkt',
+    packets: 'pkt',
+    pkt: 'pkt',
+    പാക്കറ്റ്: 'pkt',
+    liter: 'L',
+    litre: 'L',
+    liters: 'L',
+    litres: 'L',
+    l: 'L',
+    lt: 'L',
+    ലിറ്റർ: 'L',
+  }
+  return units[key] || unit || ''
+}
+
+export const movementLabel = (movementType, note) => {
+  if (movementType === 'OUT' && (/(sale|checkout|ai)/i.test(note || '') || note === 'വിൽപ്പന')) return 'Sold'
+  if (note === 'Sold') return 'Sold'
+  return note || (movementType === 'IN' ? 'സ്റ്റോക്ക് കൂട്ടി' : 'സ്റ്റോക്ക് കുറച്ചു')
+}
+
 export const state = reactive({
   // navigation
   tab: 'home',
@@ -30,12 +65,14 @@ export const state = reactive({
   creditTo: null,
   ordWho: '',
   receipt: null,
+  generatePdf: true,
 
   // stock dialogs
   showAdd: false,
-  np: reactive({ n: '', sku: '', description: '', cost: 0, price: 0, stock: 0, min: 5, unit: 'കിലോ', expiryDays: null }),
+  np: reactive({ n: '', sku: '', description: '', cost: 0, price: 0, stock: 0, min: 5, unit: 'kg', expiryDays: null }),
   adj: null,
   adjQty: 0,
+  restockOpen: false,
 
   // credit dialogs
   cust: null,
@@ -48,6 +85,7 @@ export const state = reactive({
   inp: '',
   listening: false,
   speaking: false,
+  audioLevel: 0,
   wakeListening: false,
   wakeTriggered: false,
   wakeSupported: true,
@@ -58,10 +96,9 @@ export const buyList = state.buyList
 export const history = state.history
 
 export const week = []
-export const suggestions = ['ഇന്ന് എത്ര വിൽപ്പന?', 'സ്റ്റോക്ക് കുറവ് ഏതൊക്കെ?', 'ആർക്കൊക്കെ കടം ഉണ്ട്?']
+export const suggestions = ['ഇന്ന് എത്ര വിൽപ്പന?', 'റീസ്റ്റോക്ക് ചെയ്യേണ്ട സാധനങ്ങൾ?', 'ആർക്കൊക്കെ കടം ഉണ്ട്?']
 export const navs = [
   { k: 'home', i: 'home', l: 'ഹോം' },
-  { k: 'sales', i: 'receipt', l: 'ബിൽ' },
   { k: 'stock', i: 'box', l: 'സ്റ്റോക്ക്' },
   { k: 'credit', i: 'book', l: 'കടം' },
   { k: 'more', i: 'grid', l: 'കൂടുതൽ' },
@@ -142,24 +179,45 @@ const clearCart = () => {
   state.mode = 'പണം'
   state.creditTo = null
   state.ordWho = ''
+  state.generatePdf = true
   state.checkout = false
 }
 
 export const makeBill = async () => {
-  const items = cartItems.value.map((i) => ({ n: i.n, q: i.q, price: i.price }))
-  const profit = cartItems.value.reduce((s, i) => s + i.q * (i.price - i.cost), 0) - (state.disc || 0)
-  const b = { id: state.bills.length + 101, time: now(), items, disc: state.disc || 0, total: payable.value, mode: state.mode, profit }
   try {
-    for (const item of cartItems.value) {
-      const response = await fetch(`${API_BASE}/stock/${item.id}/remove`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quantity: item.q, note: 'വിൽപ്പന' }),
-      })
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.detail || 'വിൽപ്പന അപ്ഡേറ്റ് ചെയ്യാൻ കഴിഞ്ഞില്ല')
-      }
+    const response = await fetch(`${API_BASE}/stock/checkout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: cartItems.value.map((i) => ({ product_id: i.id, quantity: i.q })),
+        discount: state.disc || 0,
+        generate_pdf: state.generatePdf,
+      }),
+    })
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail || 'വിൽപ്പന അപ്ഡേറ്റ് ചെയ്യാൻ കഴിഞ്ഞില്ല')
+    }
+    const checkout = await response.json()
+    const b = {
+      id: checkout.bill_id,
+      time: now(),
+      items: checkout.items.map((i) => ({ n: i.name, q: i.quantity, price: i.price })),
+      disc: checkout.discount,
+      total: checkout.total,
+      mode: state.mode,
+      profit: checkout.profit,
+    }
+    if (checkout.pdf_base64) {
+      const bytes = atob(checkout.pdf_base64)
+      const array = new Uint8Array(bytes.length)
+      for (let i = 0; i < bytes.length; i++) array[i] = bytes.charCodeAt(i)
+      const url = URL.createObjectURL(new Blob([array], { type: 'application/pdf' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `bill-${checkout.bill_id}.pdf`
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
     }
     if (state.mode === 'കടം' && state.creditTo) {
       state.customers.find((c) => c.id === state.creditTo)?.tx.push({ k: 'give', a: b.total, d: 'ഇന്ന്' })
@@ -213,7 +271,7 @@ export const loadProducts = async () => {
       cost: p.cost,
       stock: p.stock,
       min: p.minimum_stock,
-      unit: p.unit,
+      unit: displayUnit(p.unit),
       sold: p.sold,
       exp: p.expiry_days,
     })))
@@ -261,7 +319,11 @@ export const loadStockHistory = async () => {
       rows.forEach((row) => movements.push({
         n: product.n,
         d: row.movement_type === 'IN' ? row.quantity : -row.quantity,
-        why: row.note || (row.movement_type === 'IN' ? 'സ്റ്റോക്ക് ചേർത്തു' : 'സ്റ്റോക്ക് കുറച്ചു'),
+        why: /sale|checkout|ai/i.test(row.note || '') && row.movement_type === 'OUT'
+          ? 'Sold'
+          : (row.note === 'Sold'
+            ? 'Sold'
+            : (row.note || (row.movement_type === 'IN' ? 'സ്റ്റോക്ക് ചേർത്തു' : 'സ്റ്റോക്ക് കുറച്ചു'))),
         t: row.created_at ? new Date(row.created_at).toLocaleTimeString('ml-IN', { hour: '2-digit', minute: '2-digit' }) : '',
         createdAt: row.created_at,
       }))
@@ -323,7 +385,7 @@ export const addProduct = async () => {
     }
     await Promise.all([loadProducts(), loadStockHistory()])
     state.showAdd = false
-    Object.assign(state.np, { n: '', sku: '', description: '', cost: 0, price: 0, stock: 0, min: 5, unit: 'കിലോ', expiryDays: null })
+    Object.assign(state.np, { n: '', sku: '', description: '', cost: 0, price: 0, stock: 0, min: 5, unit: 'kg', expiryDays: null })
     say('സാധനം ചേർത്തു')
   } catch (error) {
     say(error.message)
@@ -394,6 +456,12 @@ export const receiveBuy = async () => {
       if (!response.ok) throw new Error('സ്റ്റോക്ക് അപ്ഡേറ്റ് ചെയ്യാൻ കഴിഞ്ഞില്ല')
     }
     await Promise.all([loadProducts(), loadStockHistory()])
+    refreshBuy()
+    if (!received.length) {
+      say('എന്തെങ്കിലും സാധനം തിരഞ്ഞെടുക്കൂ')
+      return
+    }
+    state.restockOpen = false
     say(received.length ? 'സ്റ്റോക്ക് അപ്ഡേറ്റ് ചെയ്തു' : 'എന്തെങ്കിലും സാധനം തിരഞ്ഞെടുക്കൂ')
   } catch (error) {
     say(error.message)
@@ -558,6 +626,7 @@ export const speak = async (text) => {
 export const ask = async (text, { voice = false } = {}) => {
   const t = (text || '').trim()
   if (!t) return
+  const restockIntent = /restock|restocking|റീസ്റ്റോക്ക്|വാങ്ങാനുള്ള\s*സാധന|കുറവുള്ള\s*സാധന|സ്റ്റോക്ക്\s*(കുറ|വാങ്ങ)/i.test(t)
   state.inp = ''
   push('u', t)
   state.listening = true
@@ -577,6 +646,24 @@ export const ask = async (text, { voice = false } = {}) => {
 
     reply = payload.reply || 'മുൻകൂട്ടി തിരിച്ചറിഞ്ഞതൊന്നും ലഭിച്ചില്ല.'
     push('b', reply)
+
+    if (restockIntent || payload.tool === 'low_stock') {
+      refreshBuy()
+      state.chatOpen = false
+      state.restockOpen = true
+    }
+
+    if (payload.tool === 'prepare_bill' && payload.result?.items?.length) {
+      Object.keys(state.cart).forEach((key) => delete state.cart[key])
+      for (const item of payload.result.items) {
+        state.cart[item.product_id] = item.quantity
+      }
+      state.disc = 0
+      state.mode = 'പണം'
+      state.generatePdf = true
+      state.chatOpen = false
+      state.checkout = true
+    }
 
     // The backend already ran the function the model picked (once, server side).
     // The screen only needs to reload the data it changed.
@@ -636,11 +723,18 @@ const startFrontendMicrophone = async () => {
     const source = wakeAudioContext.createMediaStreamSource(wakeMediaStream)
     wakeProcessor = wakeAudioContext.createScriptProcessor(4096, 1, 1)
     wakeProcessor.onaudioprocess = (event) => {
+      const samples = event.inputBuffer.getChannelData(0)
+      let sum = 0
+      for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i]
+      const rms = Math.sqrt(sum / samples.length)
+      const inputLevel = state.speaking ? 0 : Math.min(1, Math.max(0, rms - 0.015) * 10)
+      const smoothing = inputLevel > state.audioLevel ? 0.35 : 0.12
+      state.audioLevel += (inputLevel - state.audioLevel) * smoothing
+
       if (
         wakeEnabled &&
         wakeRecognition?.readyState === WebSocket.OPEN
       ) {
-        const samples = event.inputBuffer.getChannelData(0)
         // While a reply is playing, send silence so the detector never hears it
         // (the stream keeps flowing, so the backend's timeline stays continuous).
         const pcm = floatToPcm16(state.speaking ? new Float32Array(samples.length) : samples)
@@ -655,6 +749,7 @@ const startFrontendMicrophone = async () => {
   } catch (error) {
     wakeMediaStream = null
     state.wakeListening = false
+    state.audioLevel = 0
     say(error.name === 'NotAllowedError'
       ? 'മൈക്രോഫോൺ അനുമതി അനുവദിക്കൂ'
       : 'മൈക്രോഫോൺ തുറക്കാൻ കഴിഞ്ഞില്ല')
@@ -756,6 +851,7 @@ export const stopWakeWord = () => {
   wakeWatchdog = null
   stopSpeaking()
   state.wakeListening = false
+  state.audioLevel = 0
   if (wakeProcessor) {
     wakeProcessor.disconnect()
     wakeProcessor.onaudioprocess = null
