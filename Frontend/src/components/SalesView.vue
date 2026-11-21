@@ -1,6 +1,6 @@
 <script setup>
 import AppIcon from './AppIcon.vue'
-import { state, filtered, inc, dec } from '../stores/shop.js'
+import { state, filtered, inc, dec, displayUnit } from '../stores/shop.js'
 
 const stockText = (p) => (p.stock <= 0 ? 'തീർന്നു' : 'ബാക്കി ' + p.stock)
 const stockTone = (p) => (p.stock <= 0 ? 't-red' : p.stock <= p.min ? 't-orange' : '')
@@ -17,7 +17,7 @@ const stockTone = (p) => (p.stock <= 0 ? 't-red' : p.stock <= p.min ? 't-orange'
       <div v-for="p in filtered" :key="p.id" class="row">
         <div class="row-main">
           <div class="row-title">{{ p.n }}</div>
-          <div class="row-sub">₹{{ p.price }} / {{ p.unit }} · <span :class="stockTone(p)">{{ stockText(p) }}</span></div>
+          <div class="row-sub">₹{{ p.price }} / {{ displayUnit(p.unit) }} · <span :class="stockTone(p)">{{ stockText(p) }}</span></div>
         </div>
         <div v-if="state.cart[p.id]" class="stepper">
           <button class="round" :aria-label="`${p.n} കുറയ്ക്കുക`" @click="dec(p)"><AppIcon name="minus" :size="16" :stroke="2.4" /></button>
