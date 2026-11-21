@@ -138,7 +138,33 @@ const dot = { danger: 'var(--red)', warning: 'var(--orange)', info: 'var(--accen
 }
 .row:has(input:checked) .check { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; }
 .row:has(input:focus-visible) .check { outline: 2px solid var(--accent); outline-offset: 2px; }
-.row.got .row-main { opacity: .5; }
+.row.got .row-main { opacity: .55; }
+.row .row-title { position: relative; width: fit-content; max-width: 100%; }
+.row .row-title::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 52%;
+  width: 100%;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--text-2);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform .38s cubic-bezier(.22, 1, .36, 1);
+}
+.row.got .row-title::after { transform: scaleX(1); }
+.row.got .check { animation: check-pop .32s cubic-bezier(.22, 1.35, .36, 1); }
+
+@keyframes check-pop {
+  0% { transform: scale(.72); }
+  55% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .row .row-title::after { transition: none; }
+  .row.got .check { animation: none; }
+}
 
 .tag { display: block; margin: 2px 0 0 auto; padding: 4px 0; font-size: 14px; font-weight: 600; }
 
