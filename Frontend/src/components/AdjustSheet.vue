@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import AppIcon from './AppIcon.vue'
 import BaseSheet from './BaseSheet.vue'
-import { state, doAdj } from '../stores/shop.js'
+import { state, doAdj, displayUnit } from '../stores/shop.js'
 
 const next = computed(() => (state.adj ? Math.max(0, state.adj.stock + (state.adjQty || 0)) : 0))
 </script>
@@ -13,7 +13,7 @@ const next = computed(() => (state.adj ? Math.max(0, state.adj.stock + (state.ad
       <div class="group">
         <div class="row">
           <span class="row-main row-title">ഇപ്പോഴത്തെ സ്റ്റോക്ക്</span>
-          <span class="row-value num">{{ state.adj.stock }} {{ state.adj.unit }}</span>
+          <span class="row-value num">{{ state.adj.stock }} {{ displayUnit(state.adj.unit) }}</span>
         </div>
         <div class="row qty">
           <span class="row-main row-title">ചേർക്കുക / കുറയ്ക്കുക</span>
@@ -25,7 +25,7 @@ const next = computed(() => (state.adj ? Math.max(0, state.adj.stock + (state.ad
         </div>
         <div class="row">
           <span class="row-main row-title">പുതിയ സ്റ്റോക്ക്</span>
-          <span class="row-value num"><b>{{ next }} {{ state.adj.unit }}</b></span>
+          <span class="row-value num"><b>{{ next }} {{ displayUnit(state.adj.unit) }}</b></span>
         </div>
       </div>
 
