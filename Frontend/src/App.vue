@@ -15,6 +15,7 @@ import AdjustSheet from './components/AdjustSheet.vue'
 import CustomerSheet from './components/CustomerSheet.vue'
 import NewCustomerSheet from './components/NewCustomerSheet.vue'
 import ChatPanel from './components/ChatPanel.vue'
+import RestockSheet from './components/RestockSheet.vue'
 import { state, loadProducts, loadStock, loadCredits, loadStockHistory, loadSalesSummary } from './stores/shop.js'
 import { startWakeWord, stopWakeWord } from './stores/shop.js'
 
@@ -54,6 +55,7 @@ watch(
 
     <button
       class="voice-orb"
+      :style="{ '--audio-level': state.audioLevel }"
       :class="{ listening: state.wakeListening || state.wakeTriggered, detected: state.wakeTriggered }"
       aria-label="വോയ്സ് സഹായി"
       @click="openVoiceAssistant"
@@ -70,6 +72,7 @@ watch(
     <CustomerSheet />
     <NewCustomerSheet />
     <ChatPanel />
+    <RestockSheet />
 
     <Transition name="toast">
       <div v-if="state.toast" class="toast-pop" role="status">{{ state.toast }}</div>
@@ -79,6 +82,7 @@ watch(
 
 <style scoped>
 .voice-orb {
+  --audio-level: 0;
   position: absolute;
   right: 18px;
   bottom: calc(64px + env(safe-area-inset-bottom, 0px) + 16px);
@@ -140,13 +144,13 @@ watch(
 .orb-waves i:nth-child(4) { animation-delay: -.48s; }
 .orb-waves i:nth-child(5) { animation-delay: -.64s; }
 @keyframes siri-wave {
-  0%, 100% { height: 7px; opacity: .72; }
-  50% { height: 24px; opacity: 1; }
+  0%, 100% { height: calc(7px + var(--audio-level) * 17px); opacity: .72; }
+  50% { height: calc(10px + var(--audio-level) * 18px); opacity: 1; }
 }
 @keyframes siri-morph {
-  0% { transform: scale(.94) rotate(0deg); border-radius: 48% 52% 58% 42%; }
-  50% { transform: scale(1.04) rotate(8deg); border-radius: 58% 42% 45% 55%; }
-  100% { transform: scale(.98) rotate(-7deg); border-radius: 42% 58% 52% 48%; }
+  0% { transform: scale(calc(.94 + var(--audio-level) * .14)) rotate(0deg); border-radius: 48% 52% 58% 42%; }
+  50% { transform: scale(calc(1.04 + var(--audio-level) * .18)) rotate(8deg); border-radius: 58% 42% 45% 55%; }
+  100% { transform: scale(calc(.98 + var(--audio-level) * .16)) rotate(-7deg); border-radius: 42% 58% 52% 48%; }
 }
 @keyframes siri-halo {
   0% { transform: scale(.82); opacity: 0; }
