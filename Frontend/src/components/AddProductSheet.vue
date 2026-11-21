@@ -2,7 +2,7 @@
 import BaseSheet from './BaseSheet.vue'
 import { state, addProduct } from '../stores/shop.js'
 
-const units = ['കിലോ', 'എണ്ണം', 'പാക്കറ്റ്', 'ലിറ്റർ']
+const units = ['kg', 'pcs', 'pkt', 'L']
 const pick = (e) => e.target.select()
 </script>
 
