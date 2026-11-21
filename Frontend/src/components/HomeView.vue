@@ -5,245 +5,313 @@ import { state, goto, alerts, todaySales, totalCredit, lowItems, week, maxWeek }
 
 const dot = { danger: 'var(--red)', warning: 'var(--orange)', info: 'var(--accent)' }
 
+// dummy data for the background graph
+const dummyWeek = [30, 45, 38, 60, 52, 78, 90]
+
 const salesGraph = computed(() => {
-  const width = 300
-  const height = 86
-  const left = 8
-  const bottom = 76
-  const top = 12
-  const step = (width - left * 2) / Math.max(1, week.length - 1)
-  const points = week.map((item, index) => {
-    const x = left + index * step
-    const y = bottom - (item.v / maxWeek) * (bottom - top)
-    return `${x},${y}`
-  })
+  const W = 300, H = 100
+  const left = 10, top = 15, bottom = 85
+  const max = Math.max(...dummyWeek)
+  const step = (W - left * 2) / (dummyWeek.length - 1)
+  const pts = dummyWeek.map((v, i) => ({
+    x: left + i * step,
+    y: bottom - (v / max) * (bottom - top),
+  }))
+  const line = pts.map(p => `${p.x},${p.y}`).join(' ')
   return {
-    points: points.join(' '),
-    area: `${left},${bottom} ${points.join(' ')} ${width - left},${bottom}`,
+    points: line,
+    area: `${left},${H} ${line} ${W - left},${H}`,
+    dots: pts.map(p => ({ left: (p.x / W) * 100, top: (p.y / H) * 100 })),
   }
 })
+// dummy percentage for the chip
+const change = 14
+const tiles = [
+  { label: 'ഓർഡർ', icon: 'receipt', tone: 'blue', go: () => goto('sales') },
+  { label: 'സ്റ്റോക്ക്', icon: 'box', tone: 'green', go: () => goto('stock') },
+  { label: 'കടം', icon: 'user', tone: 'purple', go: () => { goto('credit'); state.newCust = true } },
+  { label: 'ബാക്കി', icon: 'wallet', tone: 'orange', go: () => goto('credit') },
+  { label: 'വിൽപ്പന', icon: 'chart', tone: 'cyan', go: () => goto('more', { sub: 'report' }) },
+  { label: 'റീസ്റ്റോക്ക്', icon: 'truck', tone: 'red', go: () => goto('more', { sub: 'buy' }) },
+]
 </script>
 
 <template>
   <div class="view page">
-    <section class="dashboard-card">
-      <div class="sales-summary">
-        <div>
-          <p class="label">ഇന്നത്തെ മൊത്തം വിൽപ്പന</p>
-          <p class="amount num">₹{{ todaySales }}</p>
-        </div>
+    <!-- Hero revenue card -->
+   <section class="hero">
+  <div class="hero-content">
+    <p class="hero-label">ഇന്നത്തെ മൊത്തം വിൽപ്പന</p>
+    <p class="hero-amount num">₹{{ todaySales }}</p>
+    <p class="hero-chip-row">
+      <span class="chip">↑ {{ change }}%</span>
+      <span class="hero-sub">ഇന്നലെയെ അപേക്ഷിച്ച്</span>
+    </p>
+  </div>
 
-        <svg class="sales-chart" viewBox="0 0 300 86" preserveAspectRatio="none" aria-hidden="true">
-          <polygon :points="salesGraph.area" class="chart-area" />
-          <polyline :points="salesGraph.points" class="chart-line" />
-          <circle
-            v-for="(point, i) in salesGraph.points.split(' ')"
-            :key="i"
-            :cx="point.split(',')[0]"
-            :cy="point.split(',')[1]"
-            r="3"
-            class="chart-dot"
-          />
-        </svg>
+  <div class="hero-graph">
+    <svg viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#0066cc" stop-opacity=".28" />
+          <stop offset="1" stop-color="#0066cc" stop-opacity="0" />
+        </linearGradient>
+      </defs>
+      <polygon :points="salesGraph.area" fill="url(#areaFill)" />
+      <polyline :points="salesGraph.points" class="chart-line" />
+    </svg>
+    <span
+      v-for="(d, i) in salesGraph.dots"
+      :key="i"
+      class="chart-dot"
+      :style="{ left: d.left + '%', top: d.top + '%' }"
+    ></span>
+  </div>
+</section>
+    <!-- Two stat cards -->
+    <div class="stats">
+      <button class="stat" @click="goto('credit')">
+        <span class="stat-icon blue"><AppIcon name="wallet" :size="22" /></span>
+        <span class="stat-copy">
+          <span class="stat-label">കിട്ടാനുള്ള കടം</span>
+          <span class="stat-value num">₹{{ totalCredit }}</span>
+        </span>
+        <AppIcon class="stat-chev" name="chevron" :size="15" />
+      </button>
+
+      <button class="stat" @click="goto('stock', {})">
+        <span class="stat-icon orange"><AppIcon name="box" :size="22" /></span>
+        <span class="stat-copy">
+          <span class="stat-label">സ്റ്റോക്ക് കുറവ്</span>
+          <span class="stat-value num">{{ lowItems.length }} <small>സാധനം</small></span>
+        </span>
+        <AppIcon class="stat-chev" name="chevron" :size="15" />
+      </button>
+    </div>
+
+    <!-- 3 x 2 tiles -->
+    <div class="tiles" aria-label="ദ്രുത പ്രവർത്തനങ്ങൾ">
+      <button v-for="t in tiles" :key="t.label" class="tile" :class="t.tone" @click="t.go">
+        <AppIcon class="tile-icon" :name="t.icon" :size="34" :stroke="2" />
+        <span class="tile-label">{{ t.label }}</span>
+        <span class="tile-go"><AppIcon name="chevron" :size="14" :stroke="2.6" /></span>
+      </button>
+    </div>
+
+    <!-- Alerts card -->
+    <section class="alerts">
+      <div class="alerts-head">
+        <h2 class="section-title">ശ്രദ്ധിക്കുക</h2>
+        <button v-if="alerts.length > 3" class="link" @click="goto('more', { sub: 'alerts' })">എല്ലാം കാണുക →</button>
       </div>
-
-      <div class="dashboard-actions">
-        <button class="dashboard-action" @click="goto('credit')">
-          <span class="action-icon blue">
-            <AppIcon name="wallet" :size="20" />
-          </span>
-          <span class="action-copy">
-            <span class="action-value num">₹{{ totalCredit }} <small>കടം</small></span>
-          </span>
-          <AppIcon class="action-chevron" name="chevron" :size="15" />
+      <template v-if="alerts.length">
+        <button v-for="(a, i) in alerts.slice(0, 3)" :key="i" class="alert-row" @click="goto(...a.to)">
+          <span class="dot" :style="{ background: dot[a.tone] }"></span>
+          <span class="alert-text">{{ a.t }}</span>
+          <AppIcon class="chev" name="chevron" :size="16" />
         </button>
-
-        <button class="dashboard-action" @click="goto('stock', {})">
-          <span class="action-icon orange">
-            <AppIcon name="box" :size="20" />
-          </span>
-          <span class="action-copy">
-            <span class="action-value num">{{ lowItems.length }} <small>സാധനം കുറവ്</small></span>
-          </span>
-          <AppIcon class="action-chevron" name="chevron" :size="15" />
-        </button>
-      </div>
+      </template>
+      <p v-else class="empty">എല്ലാം ശരിയാണ്</p>
     </section>
-
-    <div class="quick-actions" aria-label="ദ്രുത പ്രവർത്തനങ്ങൾ">
-      <button class="quick-action" @click="goto('sales')">
-        <span class="quick-icon blue"><AppIcon name="receipt" :size="30" :stroke="2.2" /></span>
-        <span>ഓർഡർ</span>
-      </button>
-      <button class="quick-action" @click="goto('stock')">
-        <span class="quick-icon orange"><AppIcon name="box" :size="30" :stroke="2.2" /></span>
-        <span>സ്റ്റോക്ക്</span>
-      </button>
-      <button class="quick-action" @click="goto('credit'); state.newCust = true">
-        <span class="quick-icon purple"><AppIcon name="user" :size="30" :stroke="2.2" /></span>
-        <span>കടം</span>
-      </button>
-      <button class="quick-action" @click="goto('credit')">
-        <span class="quick-icon green"><AppIcon name="wallet" :size="30" :stroke="2.2" /></span>
-        <span>ബാക്കി</span>
-      </button>
-      <button class="quick-action" @click="goto('more', { sub: 'report' })">
-        <span class="quick-icon cyan"><AppIcon name="chart" :size="30" :stroke="2.2" /></span>
-        <span>വിൽപ്പന</span>
-      </button>
-      <button class="quick-action" @click="goto('more', { sub: 'buy' })">
-        <span class="quick-icon red"><AppIcon name="truck" :size="30" :stroke="2.2" /></span>
-        <span>റീസ്റ്റോക്ക്</span>
-      </button>
-    </div>
-
-    <div class="section-head">
-      <h2 class="section-title">ശ്രദ്ധിക്കുക</h2>
-      <button v-if="alerts.length > 3" class="link" @click="goto('more', { sub: 'alerts' })">എല്ലാം കാണുക</button>
-    </div>
-    <div v-if="alerts.length" class="group">
-      <button v-for="(a, i) in alerts.slice(0, 3)" :key="i" class="row" @click="goto(...a.to)">
-        <span class="dot" :style="{ background: dot[a.tone] }"></span>
-        <span class="row-main row-title">{{ a.t }}</span>
-        <AppIcon class="chev" name="chevron" :size="16" />
-      </button>
-    </div>
-    <div v-else class="group"><p class="empty">എല്ലാം ശരിയാണ്</p></div>
   </div>
 </template>
 
 <style scoped>
-.dashboard-card {
-  overflow: hidden;
-  border: 1px solid rgba(0, 102, 204, .1);
-  border-radius: 18px;
-  background:
-    radial-gradient(circle at 88% 18%, rgba(77, 163, 255, .16), transparent 34%),
-    linear-gradient(145deg, #f8fbff 0%, #ffffff 58%, #edf5ff 100%);
-  box-shadow: 0 10px 28px rgba(31, 78, 121, .08);
-}
-.sales-summary {
+/* ---------- Hero ---------- */
+.hero {
   position: relative;
-  min-height: 178px;
-  padding: 20px 18px 14px;
   overflow: hidden;
+  min-height: 190px;
+  padding: 16px 18px 78px;
+  border-radius: 22px;
+  color: #0f172a;
+  background: linear-gradient(135deg, #eef6ff 0%, #ffffff 60%, #e6f1ff 100%);
+  border: 1px solid rgba(0, 102, 204, .12);
+  box-shadow: 0 10px 24px rgba(31, 78, 121, .10);
 }
-.sales-summary::before {
-  content: '';
+.hero-graph {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 70px;
+  pointer-events: none;
+}
+.hero-graph svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.hero-content { position: relative; z-index: 2; }
+.hero-label { font-size: 14px; color: #475569; }
+.hero-amount {
+  margin-top: 2px;
+  font-size: 44px;
+  font-weight: 800;
+  letter-spacing: -.03em;
+  line-height: 1.1;
+  color: #0f172a;
+}
+.hero-chip-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.chip {
+  padding: 2px 9px;
+  border-radius: 10px;
+  background: rgba(26, 127, 55, .14);
+  color: #1a7f37;
+  font-size: 13px;
+  font-weight: 700;
+}
+.chip.down { background: rgba(215, 0, 21, .12); color: #d70015; }
+.hero-sub { font-size: 12px; color: #64748b; }
+.hero-chart {
   position: absolute;
   inset: 0;
-  background-image:
-    linear-gradient(rgba(77, 163, 255, .07) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(77, 163, 255, .07) 1px, transparent 1px);
-  background-size: 28px 28px;
-  mask-image: linear-gradient(to left, #000 18%, transparent 95%);
+  width: 100%;
+  height: 100%;
   pointer-events: none;
 }
-.sales-summary > div { position: relative; z-index: 2; }
-.label { color: #64748b; font-size: 15px; }
-.amount {
-  margin-top: 3px;
-  color: #111827;
-  font-size: 52px;
-  font-weight: 750;
-  letter-spacing: -.04em;
-  line-height: 1.12;
-}
-.sales-chart {
-  position: absolute;
-  right: -18px;
-  bottom: -4px;
-  width: 82%;
-  height: 92px;
-  opacity: .9;
-  pointer-events: none;
-}
-.chart-area { fill: rgba(77, 163, 255, .12); }
 .chart-line {
   fill: none;
-  stroke: #8bbcf1;
+  stroke: #0066cc;
   stroke-width: 3;
   stroke-linecap: round;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
 }
 .chart-dot {
-  fill: #ffffff;
-  stroke: #0066cc;
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
-}
-.dashboard-actions {
+  position: absolute;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2.5px solid #0066cc;
+  pointer-events: none;
+}/* ---------- Stat cards ---------- */
+.stats {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  border-top: 1px solid rgba(60, 60, 67, .12);
-  background: rgba(255, 255, 255, .86);
-  backdrop-filter: blur(12px);
-}
-.dashboard-action {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
-  min-height: 76px;
-  padding: 12px 10px 12px 12px;
-}
-.dashboard-action + .dashboard-action { border-left: 1px solid rgba(60, 60, 67, .12); }
-.dashboard-action:active { background: var(--fill); }
-.action-icon {
-  flex: none;
-  display: inline-grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-}
-.action-icon.blue { background: rgba(0, 102, 204, .1); color: #0066cc; }
-.action-icon.orange { background: rgba(178, 80, 0, .1); color: #b25000; }
-.action-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.action-label { margin-top: 1px; overflow: hidden; color: var(--text-2); font-size: 11px; line-height: 1.1; text-overflow: ellipsis; white-space: nowrap; }
-.action-value { display: flex; align-items: baseline; gap: 5px; color: var(--text); font-size: 20px; font-weight: 750; line-height: 1.05; white-space: nowrap; }
-.action-value small { color: var(--text-2); font-size: 11px; font-weight: 600; line-height: 1; }
-.action-chevron { flex: none; color: var(--text-3); }
-.quick-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  gap: 12px;
   margin-top: 14px;
 }
-.quick-action {
+.stat {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 9px;
-  aspect-ratio: 1;
+  gap: 10px;
   min-width: 0;
-  padding: 9px 6px;
-  border: 0;
-  border-radius: 14px;
-  color: #fff;
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1.15;
-  text-align: center;
-  box-shadow: none;
+  padding: 14px 10px 14px 12px;
+  border: 1px solid rgba(60, 60, 67, .06);
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(31, 78, 121, .08);
+  text-align: left;
 }
-.quick-action:active { filter: brightness(.88); }
-.quick-icon {
+.stat:active { background: var(--fill); }
+.stat-icon {
   flex: none;
   display: inline-grid;
   place-items: center;
-  width: 52px;
-  height: 52px;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+}
+.stat-icon.blue { background: #dcebff; color: #0066cc; }
+.stat-icon.orange { background: #ffe8d1; color: #c25a00; }
+.stat-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.stat-label { overflow: hidden; color: var(--text-2); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.stat-value { color: var(--text); font-size: 22px; font-weight: 800; line-height: 1.1; white-space: nowrap; }
+.stat-value small { font-size: 13px; font-weight: 700; }
+.stat-chev { flex: none; color: var(--text-3); }
+
+/* ---------- Tiles ---------- */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  aspect-ratio: 1 / 1.02;
+  min-width: 0;
+  padding: 14px 12px 12px;
+  border: 1px solid rgba(255, 255, 255, .7);
+  border-radius: 20px;
+  text-align: left;
+  overflow: hidden;
+  box-shadow: 0 6px 16px rgba(31, 78, 121, .08);
+}
+.tile::after {            /* soft decorative blob */
+  content: '';
+  position: absolute;
+  right: -28px;
+  top: -10px;
+  width: 80px;
+  height: 120px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .28);
+  pointer-events: none;
+}
+.tile:active { filter: brightness(.95); }
+.tile-icon { position: relative; z-index: 1; }
+.tile-label { position: relative; z-index: 1; font-size: 15px; font-weight: 700; line-height: 1.15; }
+.tile-go {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 1;
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
   color: #fff;
 }
-.quick-action:has(.blue) { background: #0066cc; }
-.quick-action:has(.orange) { background: #b25000; }
-.quick-action:has(.purple) { background: #7d52c4; }
-.quick-action:has(.green) { background: #1a7f37; }
-.quick-action:has(.cyan) { background: #0088aa; }
-.quick-action:has(.red) { background: #d70015; }
-.dot { flex: none; width: 10px; height: 10px; border-radius: 50%; }
+.tile.blue   { background: linear-gradient(145deg, #dbeafe, #9cc7ff); color: #0b3f8f; }
+.tile.green  { background: linear-gradient(145deg, #dcf5e4, #9ddbb0); color: #14683a; }
+.tile.purple { background: linear-gradient(145deg, #ece4ff, #c2aaf5); color: #4b2a9b; }
+.tile.orange { background: linear-gradient(145deg, #ffe9d4, #ffb98a); color: #9a4300; }
+.tile.cyan   { background: linear-gradient(145deg, #d6f6f6, #8adbe0); color: #0a6270; }
+.tile.red    { background: linear-gradient(145deg, #ffe0e3, #ff9aa5); color: #a50f24; }
+.tile.blue .tile-go   { background: #1d5fd1; }
+.tile.green .tile-go  { background: #1a8a4b; }
+.tile.purple .tile-go { background: #6a43c8; }
+.tile.orange .tile-go { background: #d9772b; }
+.tile.cyan .tile-go   { background: #168a99; }
+.tile.red .tile-go    { background: #d12a3f; }
 
+/* ---------- Alerts ---------- */
+.alerts {
+  margin-top: 16px;
+  padding: 6px 14px 4px;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(31, 78, 121, .08);
+}
+.alerts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(60, 60, 67, .1);
+}
+.alerts-head .section-title { margin: 0; }
+.alert-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 2px;
+  text-align: left;
+}
+.alert-row + .alert-row { border-top: 1px solid rgba(60, 60, 67, .08); }
+.alert-text { flex: 1; min-width: 0; font-size: 16px; font-weight: 600; }
+.chev { flex: none; color: var(--text-3); }
+.dot { flex: none; width: 10px; height: 10px; border-radius: 50%; }
+.empty { padding: 16px 0; text-align: center; color: var(--text-2); }
 </style>

@@ -85,7 +85,7 @@ watch(
   --audio-level: 0;
   position: absolute;
   right: 18px;
-  bottom: calc(64px + env(safe-area-inset-bottom, 0px) + 16px);
+  bottom: calc(84px + env(safe-area-inset-bottom, 0px) + 16px);
   z-index: 40;
   display: grid;
   place-items: center;

@@ -24,12 +24,19 @@ import { navs, state, goto, cartCount } from '../stores/shop.js'
 
 <style scoped>
 .tabbar {
-  flex: none;
+  position: absolute;
+  right: 12px;
+  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  left: 12px;
+  z-index: 45;
   display: flex;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-  background: var(--bar);
+  min-height: 64px;
+  padding: 5px 6px;
+  border: 1px solid rgba(255, 255, 255, .72);
+  border-radius: 22px;
+  background: rgba(249, 249, 249, .94);
   backdrop-filter: blur(20px) saturate(1.8);
-  border-top: .5px solid var(--sep);
+  box-shadow: 0 10px 30px rgba(31, 78, 121, .18);
 }
 .tab {
   flex: 1;
