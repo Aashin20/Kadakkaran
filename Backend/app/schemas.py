@@ -46,3 +46,14 @@ class CreditUpdate(BaseModel):
 
 class AIChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
+
+
+class BillItem(BaseModel):
+    product_id: int = Field(gt=0)
+    quantity: int = Field(gt=0)
+
+
+class BillCreate(BaseModel):
+    items: list[BillItem] = Field(min_length=1)
+    discount: float = Field(default=0, ge=0)
+    generate_pdf: bool = False
