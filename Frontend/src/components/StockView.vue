@@ -1,6 +1,6 @@
 <script setup>
 import AppIcon from './AppIcon.vue'
-import { state, stockList, history } from '../stores/shop.js'
+import { state, stockList, history, displayUnit, movementLabel } from '../stores/shop.js'
 
 const filters = [
   { k: 'all', l: 'എല്ലാം' },
@@ -8,8 +8,8 @@ const filters = [
   { k: 'out', l: 'തീർന്നു' },
   { k: 'exp', l: 'കാലാവധി' },
 ]
-const tone = (p) => (p.stock <= 0 ? 't-red' : p.stock <= p.min ? 't-orange' : '')
-const status = (p) => (p.stock <= 0 ? 'തീർന്നു' : p.stock <= p.min ? 'കുറവ്' : '')
+const tone = (p) => (p.stock <= 0 || p.stock <= p.min ? 't-red' : '')
+const isLow = (p) => p.stock <= p.min
 </script>
 
 <template>
@@ -26,15 +26,20 @@ const status = (p) => (p.stock <= 0 ? 'തീർന്നു' : p.stock <= p.min
     <div v-if="stockList.length" class="group list">
       <button v-for="p in stockList" :key="p.id" class="row" @click="state.adj = p">
         <span class="row-main">
-          <span class="row-title">{{ p.n }}</span>
+          <span class="row-title">
+            <span v-if="isLow(p)" class="stock-indicator" aria-label="കുറവ്"></span>
+            {{ p.n }}
+          </span>
           <span class="row-sub">
-            വാങ്ങൽ ₹{{ p.cost }} · വിൽപ്പന ₹{{ p.price }}
-            <span v-if="p.exp" class="t-orange"> · കാലാവധി {{ p.exp }} ദിവസം</span>
+            <span v-if="p.exp" class="t-orange">കാലാവധി {{ p.exp }} ദിവസം</span>
           </span>
         </span>
         <span class="row-value">
-          <span class="num" :class="tone(p)">{{ p.stock }} {{ p.unit }}</span>
-          <small v-if="status(p)" :class="tone(p)">{{ status(p) }}</small>
+          <span class="stock-price num">
+            <span :class="tone(p)">{{ p.stock }}{{ displayUnit(p.unit) }}</span>
+            <span class="stock-divider">|</span>
+            ₹{{ p.price }}
+          </span>
         </span>
         <AppIcon class="chev" name="chevron" :size="16" />
       </button>
@@ -47,7 +52,7 @@ const status = (p) => (p.stock <= 0 ? 'തീർന്നു' : p.stock <= p.min
         <div v-for="(h, i) in history.slice(0, 5)" :key="i" class="row">
           <div class="row-main">
             <div class="row-title">{{ h.n }}</div>
-            <div class="row-sub">{{ h.why }} · {{ h.t }}</div>
+            <div class="row-sub">{{ movementLabel(h.d > 0 ? 'IN' : 'OUT', h.why) }} · {{ h.t }}</div>
           </div>
           <span class="row-value num" :class="h.d > 0 ? 't-green' : 't-red'">{{ h.d > 0 ? '+' : '' }}{{ h.d }}</span>
         </div>
@@ -60,4 +65,7 @@ const status = (p) => (p.stock <= 0 ? 'തീർന്നു' : p.stock <= p.min
 .filters { margin-top: 12px; }
 .list { margin-top: 12px; }
 .row-main > span { display: block; }
+.stock-indicator { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--red); vertical-align: 2px; }
+.stock-price { white-space: nowrap; }
+.stock-divider { margin: 0 5px; color: var(--text-2); }
 </style>
